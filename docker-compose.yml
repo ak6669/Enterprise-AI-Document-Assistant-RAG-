@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: rag_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rag_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag_secure_password_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-rag_enterprise}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag_user} -d ${POSTGRES_DB:-rag_enterprise}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: rag_backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - PROJECT_NAME=Enterprise AI Document Assistant
+      - VERSION=1.0.0
+      - API_V1_STR=/api/v1
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-rag_user}:${POSTGRES_PASSWORD:-rag_secure_password_2026}@db:5432/${POSTGRES_DB:-rag_enterprise}
+      - CHROMA_PERSIST_DIRECTORY=/app/data/chromadb
+      - UPLOAD_DIR=/app/data/uploads
+      - CHUNK_SIZE=800
+      - CHUNK_OVERLAP=150
+      - TOP_K_RETRIEVAL=4
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    container_name: rag_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+  backend_data:
